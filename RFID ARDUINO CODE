@@ -1,0 +1,118 @@
+#include <ESP8266WiFi.h>
+#include <WiFiClientSecure.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <SPI.h>
+#include <MFRC522.h>
+
+// WiFi credentials
+const char* ssid = "IOTLAB";
+const char* password = "IIOT@1234";
+
+// Google Apps Script Web App URL
+String GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwvPwmg1u8ff0sCjLmrNvn5v3PRYcxYANC5dZQG5hPWhUx54Tf0iAPiUJsCDQAJcCdP1g/exec";
+
+// LCD and RFID setup
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+#define RST_PIN D3
+#define SS_PIN  D4
+MFRC522 mfrc522(SS_PIN, RST_PIN);
+
+WiFiClientSecure client;
+#define BUZZER D8
+
+// RFID card name mapping
+String getNameFromUID(String uid) {
+  if (uid == "3B 21 1E 85") return "Vineetha";
+  else if (uid == "2A 58 1D 85") return "Yashasri";
+  else if (uid == "5D 73 1E 85") return "Madhuri";
+  else if (uid == "4D 46 1E 85") return "Mounika";
+  else return "Unknown";
+}
+
+void setup() {
+  Serial.begin(9600);
+  Wire.begin(D2, D1); // SDA, SCL for I2C
+  lcd.begin(16, 2);
+  lcd.backlight();
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Connecting...");
+
+  pinMode(BUZZER, OUTPUT);
+  digitalWrite(BUZZER, LOW);
+
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println("");
+  Serial.println("WiFi connected");
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("WiFi Connected!");
+
+  SPI.begin();
+  mfrc522.PCD_Init();
+  client.setInsecure(); // Accept all SSL certs
+}
+
+void loop() {
+  if (!mfrc522.PICC_IsNewCardPresent()) return;
+  if (!mfrc522.PICC_ReadCardSerial()) return;
+
+  String uidString = "";
+  for (byte i = 0; i < mfrc522.uid.size; i++) {
+    uidString += String(mfrc522.uid.uidByte[i] < 0x10 ? " 0" : " ");
+    uidString += String(mfrc522.uid.uidByte[i], HEX);
+  }
+  uidString.toUpperCase();
+  uidString.trim();
+
+  String name = getNameFromUID(uidString);
+
+  Serial.println("Card UID: " + uidString);
+  Serial.println("Name: " + name);
+
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Hello,");
+  lcd.setCursor(0, 1);
+  lcd.print(name);
+
+  digitalWrite(BUZZER, HIGH);
+  delay(200);
+  digitalWrite(BUZZER, LOW);
+
+  // Encode UID and Name for URL
+  String encodedUID = uidString;
+  encodedUID.replace(" ", "%20");
+
+  String encodedName = name;
+  encodedName.replace(" ", "%20");
+
+  // Send to Google Sheets
+  String url = GOOGLE_SCRIPT_URL + "?name=" + encodedName + "&id=" + encodedUID;
+  Serial.println("Request URL: " + url);
+
+  if (client.connect("script.google.com", 443)) {
+    client.print(String("GET ") + url + " HTTP/1.1\r\n" +
+                 "Host: script.google.com\r\n" +
+                 "Connection: close\r\n\r\n");
+    delay(500);
+
+    while (client.available()) {
+      String line = client.readStringUntil('\n');
+      Serial.println(line);
+    }
+  } else {
+    Serial.println("Connection to Google Script failed.");
+  }
+
+  client.stop();
+
+  delay(2000);
+}
+rfid code
